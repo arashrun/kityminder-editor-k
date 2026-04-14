@@ -88,6 +88,17 @@ module.exports = (env) => {
           test: /ui-codemirror\.js$/,
           use: ['ng-annotate-loader'],
         },
+        {
+          test: /\.(js|mjs)$/,
+          include: /node_modules[\\/](@angular|rxjs)[\\/]/,
+          use: {
+            loader: 'babel-loader',
+            options: {
+              plugins: ['@babel/plugin-transform-class-static-block'],
+              cacheDirectory: true,
+            },
+          },
+        },
       ],
     },
     resolve: {
