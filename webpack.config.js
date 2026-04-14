@@ -173,6 +173,10 @@ module.exports = (env) => {
             from: relPath('node_modules/kityminder-core/dist/kityminder.core.css'),
             to: 'kityminder-core.css',
           },
+          {
+            from: relPath('public/index.html'),
+            to: 'index.html',
+          },
         ],
       }),
     ],
