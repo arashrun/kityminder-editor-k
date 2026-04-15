@@ -1,0 +1,11 @@
+{
+    "id": "kityminder-editor-k",
+    "name": "KityMinder Editor K",
+    "version": "0.0.1",
+    "minAppVersion": "0.15.0",
+    "description": "A mind map editor powered by KityMinder for Obsidian",
+    "author": "fex",
+    "authorUrl": "https://github.com/Sherman-Chen/kityminder-editor-k",
+    "fundingUrl": "",
+    "isDesktopOnly": true
+}
