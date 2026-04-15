@@ -33,6 +33,7 @@ module.exports = (env) => {
     entry: {
       'kityminder-editor': './editor.js',
       'kityminder-viewer': './viewer.js',
+      'obsidian-editor': './obsidian-entry.js',
     },
     output: {
       path: relPath('dist'),
@@ -128,7 +129,9 @@ module.exports = (env) => {
         }),
       ],
       splitChunks: {
-        chunks: 'all',
+        chunks(chunk) {
+          return chunk.name !== 'obsidian-editor';
+        },
         cacheGroups: {
           default: false,
           defaultVendors: false,

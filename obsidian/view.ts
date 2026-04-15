@@ -11,7 +11,7 @@ declare global {
 
 export class KityMinderView extends TextFileView {
     private minderContainer: HTMLElement;
-    private minder: any;
+    private editor: any;
     private isRendering: boolean = false;
 
     getViewData(): string {
@@ -23,13 +23,13 @@ export class KityMinderView extends TextFileView {
         if (clear) {
             this.clear();
         }
-        this.renderMinder();
+        this.renderEditor();
     }
 
     clear(): void {
-        if (this.minder) {
+        if (this.editor) {
             this.minderContainer.empty();
-            this.minder = null;
+            this.editor = null;
         }
     }
 
@@ -42,34 +42,37 @@ export class KityMinderView extends TextFileView {
         this.minderContainer.style.width = '100%';
         this.minderContainer.style.height = '100%';
         this.minderContainer.style.overflow = 'hidden';
+        this.minderContainer.style.position = 'relative';
     }
 
-    renderMinder() {
-        if (!window.kityminder || !this.minderContainer || this.isRendering) {
+    renderEditor() {
+        if (!window.kityminder || !window.kityminder.Editor || !this.minderContainer || this.isRendering) {
             return;
         }
         this.isRendering = true;
 
         this.minderContainer.empty();
 
-        const Minder = window.kityminder.Minder;
-        this.minder = new Minder({
-            renderTo: this.minderContainer,
-            theme: 'fresh'
-        });
+        // KMEditor 需要容器有明确的定位，否则内部绝对定位会失效
+        this.minderContainer.style.position = 'relative';
 
+        // 使用 KMEditor（含完整 runtime：键盘、热盒、输入、剪贴板、历史、拖拽等）
+        this.editor = new window.kityminder.Editor(this.minderContainer);
+        const minder = this.editor.minder;
+
+        // 导入数据
         try {
             const json = JSON.parse(this.data);
-            this.minder.importJson(json);
+            minder.importJson(json);
         } catch (e) {
             console.error('Invalid mindmap data', e);
-            this.minder.importJson({ root: { data: { text: '无效的数据' } } });
+            minder.importJson({ root: { data: { text: '无效的数据' } } });
         }
 
-        // 监听内容变化，同步到 this.data 以触发 Obsidian 保存
-        this.minder.on('contentchange', () => {
+        // 内容变化时自动保存
+        minder.on('contentchange', () => {
             try {
-                this.data = JSON.stringify(this.minder.exportJson(), null, 2);
+                this.data = JSON.stringify(minder.exportJson(), null, 2);
                 this.requestSave();
             } catch (e) {
                 console.error('Failed to export mindmap', e);

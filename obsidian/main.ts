@@ -23,7 +23,7 @@ export default class KityMinderPlugin extends Plugin {
     }
 
     async injectKityMinderCore() {
-        if (window.kityminder) return;
+        if (window.kityminder && window.kityminder.Editor) return;
 
         // Inject CSS
         const styleId = 'kityminder-core-css';
