@@ -19,6 +19,9 @@ export class KityMinderNoteModal extends Modal {
     private selectedIndex: number = -1;
     private dropdownItems: HTMLElement[] = [];
     private dropdownFileMap: Map<number, TFile> = new Map();
+    private dropdownMode: 'file' | 'header' = 'file';
+    private headerItems: { text: string; subpath: string; level: number }[] = [];
+    private headerSourceFile: TFile | null = null;
 
     constructor(app: App, meta: NodeMeta, onSave: (meta: NodeMeta) => void) {
         super(app);
@@ -32,13 +35,25 @@ export class KityMinderNoteModal extends Modal {
         this.onSave({ note: this.noteText, resources: [...this.resources] });
     }
 
+    private async getMarkdownHeaders(file: TFile): Promise<{ text: string; subpath: string; level: number }[]> {
+        const cache = this.app.metadataCache.getFileCache(file);
+        const headings = cache?.headings ?? [];
+        return headings
+            .map((h) => ({
+                text: h.heading,
+                subpath: `#${h.heading}`,
+                level: h.level,
+            }))
+            .filter((h) => h.text.trim().length > 0);
+    }
+
     onOpen() {
         const { contentEl } = this;
         contentEl.empty();
-        contentEl.createEl('h2', { text: '节点备注与资源' });
+        // contentEl.createEl('h2', { text: '节点备注与资源' });
 
         // =================== 关联资源 / Obsidian 笔记 ===================
-        contentEl.createEl('h3', { text: '关联资源 / Obsidian 笔记' });
+        contentEl.createEl('h3', { text: '关联资源' });
         const resourceList = contentEl.createDiv({ cls: 'kityminder-resource-list' });
         resourceList.style.marginBottom = '12px';
 
@@ -132,6 +147,15 @@ export class KityMinderNoteModal extends Modal {
             }
         };
 
+        const resetDropdownState = () => {
+            this.selectedIndex = -1;
+            this.dropdownItems = [];
+            this.dropdownFileMap.clear();
+            this.dropdownMode = 'file';
+            this.headerItems = [];
+            this.headerSourceFile = null;
+        };
+
         const selectFileByIndex = (index: number) => {
             const file = this.dropdownFileMap.get(index);
             if (!file) return;
@@ -143,17 +167,29 @@ export class KityMinderNoteModal extends Modal {
             renderResources();
             input.value = '';
             dropdown.style.display = 'none';
-            this.selectedIndex = -1;
-            this.dropdownItems = [];
-            this.dropdownFileMap.clear();
+            resetDropdownState();
             this.doSave();
         };
 
-        const showDropdown = (query: string) => {
+        const selectHeaderByIndex = (index: number) => {
+            if (this.dropdownMode !== 'header') return;
+            const file = this.headerSourceFile;
+            const h = this.headerItems[index];
+            if (!file || !h) return;
+
+            const name = `${file.basename}#${h.text}`;
+            const path = `${file.path}#${h.text}`;
+            this.resources.push({ name, path });
+            renderResources();
+            input.value = '';
+            dropdown.style.display = 'none';
+            resetDropdownState();
+            this.doSave();
+        };
+
+        const showFileDropdown = (query: string) => {
             dropdown.empty();
-            this.selectedIndex = -1;
-            this.dropdownItems = [];
-            this.dropdownFileMap.clear();
+            resetDropdownState();
 
             const fileQuery = query.split('#')[0].trim();
             const matches = allFiles.filter((f) => f.path.toLowerCase().includes(fileQuery.toLowerCase()));
@@ -179,23 +215,74 @@ export class KityMinderNoteModal extends Modal {
             dropdown.style.display = 'block';
         };
 
+        const showHeaderDropdownForActiveFile = async () => {
+            if (this.selectedIndex < 0) return;
+            const file = this.dropdownFileMap.get(this.selectedIndex);
+            if (!file) return;
+            if (file.extension !== 'md') return;
+
+            const headers = await this.getMarkdownHeaders(file);
+            dropdown.empty();
+            this.dropdownMode = 'header';
+            this.headerSourceFile = file;
+            this.dropdownItems = [];
+            this.headerItems = headers;
+
+            if (headers.length === 0) {
+                // No headers; keep showing file dropdown
+                return;
+            }
+
+            headers.slice(0, 100).forEach((h, i) => {
+                const item = dropdown.createDiv();
+                item.style.padding = '6px 10px';
+                item.style.cursor = 'pointer';
+                item.style.display = 'flex';
+                item.style.justifyContent = 'space-between';
+                item.style.gap = '12px';
+
+                const titleEl = item.createDiv({ text: h.text });
+                titleEl.style.flex = '1';
+                // Visual indent for heading level
+                titleEl.style.paddingLeft = `${Math.max(0, h.level - 1) * 12}px`;
+
+                const levelEl = item.createDiv({ text: `H${h.level}` });
+                levelEl.style.opacity = '0.7';
+                levelEl.style.flexShrink = '0';
+
+                item.addEventListener('mouseenter', () => {
+                    this.selectedIndex = i;
+                    updateSelection();
+                });
+                item.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    selectHeaderByIndex(i);
+                });
+                this.dropdownItems.push(item);
+            });
+
+            this.selectedIndex = 0;
+            updateSelection();
+            dropdown.style.display = 'block';
+        };
+
         input.addEventListener('input', () => {
             const val = input.value;
             if (val.includes('[[')) {
                 const query = getQuery(val);
                 if (query || val.endsWith('[[')) {
-                    showDropdown(query);
+                    showFileDropdown(query);
                 } else {
                     dropdown.style.display = 'none';
                 }
             } else if (val.trim()) {
-                showDropdown(val.trim());
+                showFileDropdown(val.trim());
             } else {
                 dropdown.style.display = 'none';
             }
         });
 
-        input.addEventListener('keydown', (e) => {
+        input.addEventListener('keydown', async (e) => {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 if (this.dropdownItems.length && dropdown.style.display !== 'none') {
@@ -208,35 +295,41 @@ export class KityMinderNoteModal extends Modal {
                     this.selectedIndex = (this.selectedIndex - 1 + this.dropdownItems.length) % this.dropdownItems.length;
                     updateSelection();
                 }
+            } else if (e.key === '#') {
+                // If a markdown file is currently highlighted in the file dropdown, switch to header completion.
+                if (dropdown.style.display !== 'none' && this.dropdownMode === 'file' && this.selectedIndex >= 0) {
+                    await showHeaderDropdownForActiveFile();
+                    if (this.dropdownMode === 'header') {
+                        e.preventDefault();
+                        return;
+                    }
+                }
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 if (this.selectedIndex >= 0 && dropdown.style.display !== 'none') {
-                    selectFileByIndex(this.selectedIndex);
-                } else if (input.value.trim()) {
-                    const val = input.value.trim();
-                    this.resources.push({ name: val, path: val });
-                    renderResources();
-                    input.value = '';
-                    dropdown.style.display = 'none';
-                    this.doSave();
+                    if (this.dropdownMode === 'file') {
+                        selectFileByIndex(this.selectedIndex);
+                    } else {
+                        selectHeaderByIndex(this.selectedIndex);
+                    }
                 }
             } else if (e.key === 'Escape') {
                 dropdown.style.display = 'none';
-                this.selectedIndex = -1;
+                resetDropdownState();
             }
         });
 
         input.addEventListener('blur', () => {
             setTimeout(() => {
                 dropdown.style.display = 'none';
-                this.selectedIndex = -1;
+                resetDropdownState();
             }, 150);
         });
 
         // =================== Markdown 备注（上下单列布局） ===================
         new Setting(contentEl)
-            .setName('Markdown 备注')
-            .setDesc('直接输入 Markdown，下方会实时预览');
+            .setName('简单备注');
+            // .setDesc('直接输入 Markdown，下方会实时预览');
 
         const textarea = contentEl.createEl('textarea', {
             cls: 'kityminder-note-textarea',

@@ -38,6 +38,9 @@ var KityMinderNoteModal = class extends import_obsidian.Modal {
     this.selectedIndex = -1;
     this.dropdownItems = [];
     this.dropdownFileMap = /* @__PURE__ */ new Map();
+    this.dropdownMode = "file";
+    this.headerItems = [];
+    this.headerSourceFile = null;
     this.noteText = meta.note || "";
     this.resources = meta.resources ? [...meta.resources] : [];
     this.onSave = onSave;
@@ -46,11 +49,20 @@ var KityMinderNoteModal = class extends import_obsidian.Modal {
   doSave() {
     this.onSave({ note: this.noteText, resources: [...this.resources] });
   }
+  async getMarkdownHeaders(file) {
+    var _a;
+    const cache = this.app.metadataCache.getFileCache(file);
+    const headings = (_a = cache == null ? void 0 : cache.headings) != null ? _a : [];
+    return headings.map((h) => ({
+      text: h.heading,
+      subpath: `#${h.heading}`,
+      level: h.level
+    })).filter((h) => h.text.trim().length > 0);
+  }
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "\u8282\u70B9\u5907\u6CE8\u4E0E\u8D44\u6E90" });
-    contentEl.createEl("h3", { text: "\u5173\u8054\u8D44\u6E90 / Obsidian \u7B14\u8BB0" });
+    contentEl.createEl("h3", { text: "\u5173\u8054\u8D44\u6E90" });
     const resourceList = contentEl.createDiv({ cls: "kityminder-resource-list" });
     resourceList.style.marginBottom = "12px";
     const renderResources = () => {
@@ -133,6 +145,14 @@ var KityMinderNoteModal = class extends import_obsidian.Modal {
         this.dropdownItems[this.selectedIndex].scrollIntoView({ block: "nearest" });
       }
     };
+    const resetDropdownState = () => {
+      this.selectedIndex = -1;
+      this.dropdownItems = [];
+      this.dropdownFileMap.clear();
+      this.dropdownMode = "file";
+      this.headerItems = [];
+      this.headerSourceFile = null;
+    };
     const selectFileByIndex = (index) => {
       const file = this.dropdownFileMap.get(index);
       if (!file) return;
@@ -144,16 +164,26 @@ var KityMinderNoteModal = class extends import_obsidian.Modal {
       renderResources();
       input.value = "";
       dropdown.style.display = "none";
-      this.selectedIndex = -1;
-      this.dropdownItems = [];
-      this.dropdownFileMap.clear();
+      resetDropdownState();
       this.doSave();
     };
-    const showDropdown = (query) => {
+    const selectHeaderByIndex = (index) => {
+      if (this.dropdownMode !== "header") return;
+      const file = this.headerSourceFile;
+      const h = this.headerItems[index];
+      if (!file || !h) return;
+      const name = `${file.basename}#${h.text}`;
+      const path = `${file.path}#${h.text}`;
+      this.resources.push({ name, path });
+      renderResources();
+      input.value = "";
+      dropdown.style.display = "none";
+      resetDropdownState();
+      this.doSave();
+    };
+    const showFileDropdown = (query) => {
       dropdown.empty();
-      this.selectedIndex = -1;
-      this.dropdownItems = [];
-      this.dropdownFileMap.clear();
+      resetDropdownState();
       const fileQuery = query.split("#")[0].trim();
       const matches = allFiles.filter((f) => f.path.toLowerCase().includes(fileQuery.toLowerCase()));
       if (matches.length === 0) {
@@ -177,22 +207,63 @@ var KityMinderNoteModal = class extends import_obsidian.Modal {
       });
       dropdown.style.display = "block";
     };
+    const showHeaderDropdownForActiveFile = async () => {
+      if (this.selectedIndex < 0) return;
+      const file = this.dropdownFileMap.get(this.selectedIndex);
+      if (!file) return;
+      if (file.extension !== "md") return;
+      const headers = await this.getMarkdownHeaders(file);
+      dropdown.empty();
+      this.dropdownMode = "header";
+      this.headerSourceFile = file;
+      this.dropdownItems = [];
+      this.headerItems = headers;
+      if (headers.length === 0) {
+        return;
+      }
+      headers.slice(0, 100).forEach((h, i) => {
+        const item = dropdown.createDiv();
+        item.style.padding = "6px 10px";
+        item.style.cursor = "pointer";
+        item.style.display = "flex";
+        item.style.justifyContent = "space-between";
+        item.style.gap = "12px";
+        const titleEl = item.createDiv({ text: h.text });
+        titleEl.style.flex = "1";
+        titleEl.style.paddingLeft = `${Math.max(0, h.level - 1) * 12}px`;
+        const levelEl = item.createDiv({ text: `H${h.level}` });
+        levelEl.style.opacity = "0.7";
+        levelEl.style.flexShrink = "0";
+        item.addEventListener("mouseenter", () => {
+          this.selectedIndex = i;
+          updateSelection();
+        });
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          selectHeaderByIndex(i);
+        });
+        this.dropdownItems.push(item);
+      });
+      this.selectedIndex = 0;
+      updateSelection();
+      dropdown.style.display = "block";
+    };
     input.addEventListener("input", () => {
       const val = input.value;
       if (val.includes("[[")) {
         const query = getQuery(val);
         if (query || val.endsWith("[[")) {
-          showDropdown(query);
+          showFileDropdown(query);
         } else {
           dropdown.style.display = "none";
         }
       } else if (val.trim()) {
-        showDropdown(val.trim());
+        showFileDropdown(val.trim());
       } else {
         dropdown.style.display = "none";
       }
     });
-    input.addEventListener("keydown", (e) => {
+    input.addEventListener("keydown", async (e) => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         if (this.dropdownItems.length && dropdown.style.display !== "none") {
@@ -205,30 +276,35 @@ var KityMinderNoteModal = class extends import_obsidian.Modal {
           this.selectedIndex = (this.selectedIndex - 1 + this.dropdownItems.length) % this.dropdownItems.length;
           updateSelection();
         }
+      } else if (e.key === "#") {
+        if (dropdown.style.display !== "none" && this.dropdownMode === "file" && this.selectedIndex >= 0) {
+          await showHeaderDropdownForActiveFile();
+          if (this.dropdownMode === "header") {
+            e.preventDefault();
+            return;
+          }
+        }
       } else if (e.key === "Enter") {
         e.preventDefault();
         if (this.selectedIndex >= 0 && dropdown.style.display !== "none") {
-          selectFileByIndex(this.selectedIndex);
-        } else if (input.value.trim()) {
-          const val = input.value.trim();
-          this.resources.push({ name: val, path: val });
-          renderResources();
-          input.value = "";
-          dropdown.style.display = "none";
-          this.doSave();
+          if (this.dropdownMode === "file") {
+            selectFileByIndex(this.selectedIndex);
+          } else {
+            selectHeaderByIndex(this.selectedIndex);
+          }
         }
       } else if (e.key === "Escape") {
         dropdown.style.display = "none";
-        this.selectedIndex = -1;
+        resetDropdownState();
       }
     });
     input.addEventListener("blur", () => {
       setTimeout(() => {
         dropdown.style.display = "none";
-        this.selectedIndex = -1;
+        resetDropdownState();
       }, 150);
     });
-    new import_obsidian.Setting(contentEl).setName("Markdown \u5907\u6CE8").setDesc("\u76F4\u63A5\u8F93\u5165 Markdown\uFF0C\u4E0B\u65B9\u4F1A\u5B9E\u65F6\u9884\u89C8");
+    new import_obsidian.Setting(contentEl).setName("\u7B80\u5355\u5907\u6CE8");
     const textarea = contentEl.createEl("textarea", {
       cls: "kityminder-note-textarea"
     });
