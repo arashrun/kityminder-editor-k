@@ -34,6 +34,7 @@ define(function(require, exports, module) {
     assemble(require('./runtime/jumping'));
     assemble(require('./runtime/priority'));
     assemble(require('./runtime/progress'));
+    assemble(require('./runtime/obsidian-resource-hint'));
 
 
     return module.exports = KMEditor;
