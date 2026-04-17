@@ -22,6 +22,7 @@ export class KityMinderNoteModal extends Modal {
     private dropdownMode: 'file' | 'header' = 'file';
     private headerItems: { text: string; subpath: string; level: number }[] = [];
     private headerSourceFile: TFile | null = null;
+    private activeFileMatches: TFile[] = [];
 
     constructor(app: App, meta: NodeMeta, onSave: (meta: NodeMeta) => void) {
         super(app);
@@ -52,8 +53,19 @@ export class KityMinderNoteModal extends Modal {
         contentEl.empty();
         // contentEl.createEl('h2', { text: '节点备注与资源' });
 
+        const createSectionTitle = (text: string) => {
+            const title = contentEl.createEl('div', { text });
+            title.style.margin = '14px 0 8px';
+            title.style.fontSize = '12px';
+            title.style.fontWeight = '600';
+            title.style.letterSpacing = '0.08em';
+            title.style.textTransform = 'uppercase';
+            title.style.color = 'var(--text-muted)';
+            return title;
+        };
+
         // =================== 关联资源 / Obsidian 笔记 ===================
-        contentEl.createEl('h3', { text: '关联资源' });
+        createSectionTitle('关联资源');
         const resourceList = contentEl.createDiv({ cls: 'kityminder-resource-list' });
         resourceList.style.marginBottom = '12px';
 
@@ -138,6 +150,21 @@ export class KityMinderNoteModal extends Modal {
             return val.trim();
         };
 
+        const normalizeWikiInput = (val: string) => {
+            return val
+                .replace(/【/g, '[')
+                .replace(/】/g, ']')
+                .replace(/\[\[/g, '[[')
+                .replace(/\]\]/g, ']]');
+        };
+
+        const getHeaderQuery = (query: string) => {
+            if (!query.includes('#')) {
+                return '';
+            }
+            return query.split('#').slice(1).join('#').trim();
+        };
+
         const updateSelection = () => {
             this.dropdownItems.forEach((item, idx) => {
                 item.style.background = idx === this.selectedIndex ? 'var(--background-modifier-hover)' : '';
@@ -154,6 +181,7 @@ export class KityMinderNoteModal extends Modal {
             this.dropdownMode = 'file';
             this.headerItems = [];
             this.headerSourceFile = null;
+            this.activeFileMatches = [];
         };
 
         const selectFileByIndex = (index: number) => {
@@ -187,53 +215,24 @@ export class KityMinderNoteModal extends Modal {
             this.doSave();
         };
 
-        const showFileDropdown = (query: string) => {
-            dropdown.empty();
-            resetDropdownState();
+        const showHeaderDropdown = (file: TFile, headers: { text: string; subpath: string; level: number }[], headerQuery: string) => {
+            const normalizedQuery = headerQuery.toLowerCase();
+            const filteredHeaders = normalizedQuery
+                ? headers.filter((h) => h.text.toLowerCase().includes(normalizedQuery))
+                : headers;
 
-            const fileQuery = query.split('#')[0].trim();
-            const matches = allFiles.filter((f) => f.path.toLowerCase().includes(fileQuery.toLowerCase()));
-            if (matches.length === 0) {
-                dropdown.style.display = 'none';
-                return;
-            }
-            matches.slice(0, 50).forEach((file, i) => {
-                const item = dropdown.createDiv({ text: file.path });
-                item.style.padding = '6px 10px';
-                item.style.cursor = 'pointer';
-                item.addEventListener('mouseenter', () => {
-                    this.selectedIndex = i;
-                    updateSelection();
-                });
-                item.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    selectFileByIndex(i);
-                });
-                this.dropdownItems.push(item);
-                this.dropdownFileMap.set(i, file);
-            });
-            dropdown.style.display = 'block';
-        };
-
-        const showHeaderDropdownForActiveFile = async () => {
-            if (this.selectedIndex < 0) return;
-            const file = this.dropdownFileMap.get(this.selectedIndex);
-            if (!file) return;
-            if (file.extension !== 'md') return;
-
-            const headers = await this.getMarkdownHeaders(file);
             dropdown.empty();
             this.dropdownMode = 'header';
             this.headerSourceFile = file;
             this.dropdownItems = [];
-            this.headerItems = headers;
+            this.headerItems = filteredHeaders;
 
-            if (headers.length === 0) {
-                // No headers; keep showing file dropdown
+            if (filteredHeaders.length === 0) {
+                dropdown.style.display = 'none';
                 return;
             }
 
-            headers.slice(0, 100).forEach((h, i) => {
+            filteredHeaders.slice(0, 100).forEach((h, i) => {
                 const item = dropdown.createDiv();
                 item.style.padding = '6px 10px';
                 item.style.cursor = 'pointer';
@@ -243,7 +242,6 @@ export class KityMinderNoteModal extends Modal {
 
                 const titleEl = item.createDiv({ text: h.text });
                 titleEl.style.flex = '1';
-                // Visual indent for heading level
                 titleEl.style.paddingLeft = `${Math.max(0, h.level - 1) * 12}px`;
 
                 const levelEl = item.createDiv({ text: `H${h.level}` });
@@ -266,20 +264,88 @@ export class KityMinderNoteModal extends Modal {
             dropdown.style.display = 'block';
         };
 
-        input.addEventListener('input', () => {
+        const showFileDropdown = (query: string) => {
+            dropdown.empty();
+            resetDropdownState();
+
+            const fileQuery = query.split('#')[0].trim();
+            const matches = allFiles.filter((f) => f.path.toLowerCase().includes(fileQuery.toLowerCase()));
+            this.activeFileMatches = matches;
+            if (matches.length === 0) {
+                dropdown.style.display = 'none';
+                return;
+            }
+            matches.slice(0, 50).forEach((file, i) => {
+                const item = dropdown.createDiv({ text: file.path });
+                item.style.padding = '6px 10px';
+                item.style.cursor = 'pointer';
+                item.addEventListener('mouseenter', () => {
+                    this.selectedIndex = i;
+                    updateSelection();
+                });
+                item.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    selectFileByIndex(i);
+                });
+                this.dropdownItems.push(item);
+                this.dropdownFileMap.set(i, file);
+            });
+            dropdown.style.display = 'block';
+        };
+
+        const showHeaderDropdownForFile = async (file: TFile, headerQuery: string) => {
+            if (!file) return;
+            if (file.extension !== 'md') return;
+
+            const headers = await this.getMarkdownHeaders(file);
+            if (headers.length === 0) {
+                dropdown.style.display = 'none';
+                return;
+            }
+
+            showHeaderDropdown(file, headers, headerQuery);
+        };
+
+        const refreshDropdown = async () => {
+            const normalizedValue = normalizeWikiInput(input.value);
+            if (normalizedValue !== input.value) {
+                const cursor = normalizedValue.length;
+                input.value = normalizedValue;
+                input.setSelectionRange(cursor, cursor);
+            }
+
             const val = input.value;
             if (val.includes('[[')) {
                 const query = getQuery(val);
-                if (query || val.endsWith('[[')) {
+                if (query.includes('#')) {
+                    const fileQuery = query.split('#')[0].trim();
+                    const headerQuery = getHeaderQuery(query);
+                    const file = allFiles.find((f) => f.path.toLowerCase() === fileQuery.toLowerCase())
+                        || allFiles.find((f) => f.basename.toLowerCase() === fileQuery.toLowerCase())
+                        || this.activeFileMatches[0];
+
+                    if (file) {
+                        await showHeaderDropdownForFile(file, headerQuery);
+                    } else {
+                        dropdown.style.display = 'none';
+                        resetDropdownState();
+                    }
+                } else if (query || val.endsWith('[[')) {
                     showFileDropdown(query);
                 } else {
                     dropdown.style.display = 'none';
+                    resetDropdownState();
                 }
             } else if (val.trim()) {
                 showFileDropdown(val.trim());
             } else {
                 dropdown.style.display = 'none';
+                resetDropdownState();
             }
+        };
+
+        input.addEventListener('input', () => {
+            void refreshDropdown();
         });
 
         input.addEventListener('keydown', async (e) => {
@@ -296,12 +362,14 @@ export class KityMinderNoteModal extends Modal {
                     updateSelection();
                 }
             } else if (e.key === '#') {
-                // If a markdown file is currently highlighted in the file dropdown, switch to header completion.
                 if (dropdown.style.display !== 'none' && this.dropdownMode === 'file' && this.selectedIndex >= 0) {
-                    await showHeaderDropdownForActiveFile();
-                    if (this.dropdownMode === 'header') {
-                        e.preventDefault();
-                        return;
+                    const file = this.dropdownFileMap.get(this.selectedIndex);
+                    if (file) {
+                        const query = getQuery(input.value);
+                        const headerQuery = getHeaderQuery(`${query}#`);
+                        setTimeout(() => {
+                            void showHeaderDropdownForFile(file, headerQuery);
+                        }, 0);
                     }
                 }
             } else if (e.key === 'Enter') {
@@ -327,9 +395,7 @@ export class KityMinderNoteModal extends Modal {
         });
 
         // =================== Markdown 备注（上下单列布局） ===================
-        new Setting(contentEl)
-            .setName('简单备注');
-            // .setDesc('直接输入 Markdown，下方会实时预览');
+        createSectionTitle('简单备注');
 
         const textarea = contentEl.createEl('textarea', {
             cls: 'kityminder-note-textarea',

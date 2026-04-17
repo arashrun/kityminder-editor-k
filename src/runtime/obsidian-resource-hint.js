@@ -1,4 +1,7 @@
 define(function(require, exports, module) {
+    var kity = require('kityminder-core/src/core/kity');
+    var Renderer = require('kityminder-core/src/core/render');
+
     function parseResources(node) {
         var resources = node.getData('resources');
 
@@ -21,87 +24,97 @@ define(function(require, exports, module) {
         return resources instanceof Array ? resources : [];
     }
 
-    function installResourceHint(editor) {
-        var minder = editor.minder;
-        var kity = window.kity;
+    var ResourceCountBadge = kity.createClass('ObsidianResourceCountBadge', {
+        base: kity.Group,
 
-        if (!minder || !kity || minder.__obsidianResourceHintInstalled) {
-            return;
-        }
+        constructor: function() {
+            this.callBase();
+            this.width = 20;
+            this.height = 16;
 
-        function ensureIcon(node) {
-            var icon = node._obsidianResourceHintIcon;
+            this.rect = new kity.Rect(20, 16, 0, 0, 8)
+                .fill('#7c6cff')
+                .stroke('#7c6cff', 1);
 
-            if (!icon) {
-                icon = new kity.Group();
-                icon.dot = new kity.Circle(6).fill('#7c6cff');
-                icon.text = new kity.Text().setContent('R').setFontSize(9).setTextAnchor('middle');
-                icon.text.setY(3);
-                icon.text.fill('#ffffff');
+            this.glow = new kity.Rect(18, 12, 1, 2, 6)
+                .fill('rgba(255, 255, 255, .38)');
 
-                icon.addShapes([icon.dot, icon.text]);
-                icon.setStyle('cursor', 'pointer');
+            this.text = new kity.Text()
+                .setFontSize(10)
+                .setTextAnchor('middle')
+                .setVerticalAlign('middle');
 
-                icon.on('mousedown', function(e) {
-                    minder.select(node, true);
-                    minder.fire('editnoterequest');
-                    e.stopPropagation();
-                    e.preventDefault();
-                });
+            this.text.setY(this.height / 2);
 
-                icon.on('mouseup click dblclick', function(e) {
-                    e.stopPropagation();
-                    e.preventDefault();
-                });
+            this.addShapes([this.rect, this.glow, this.text]);
 
-                node.getRenderContainer().addShape(icon);
-                node._obsidianResourceHintIcon = icon;
-            }
-
-            return icon;
-        }
-
-        function updateNode(node) {
-            var icon = ensureIcon(node);
-            var hasResources = parseResources(node).length > 0;
-            var box;
-            var offsetX;
-
-            if (!icon) {
-                return;
-            }
-
-            if (!hasResources) {
-                icon.setVisible(false);
-                return;
-            }
-
-            box = node.getContentBox ? node.getContentBox() : node.getRenderBox();
-            offsetX = box.right + 8;
-
-            if (node.getData('note')) {
-                offsetX += 18;
-            }
-
-            icon.setVisible(true);
-            icon.setTranslate(offsetX, 0);
-        }
-
-        function updateTree() {
-            minder.getRoot().traverse(function(node) {
-                updateNode(node);
+            this.on('mouseover', function() {
+                this.rect.fill('rgba(255, 236, 140, 1)');
+                this.glow.fill('rgba(255, 255, 255, .5)');
+            }).on('mouseout', function() {
+                this.rect.fill('rgba(255, 243, 170, .95)');
+                this.glow.fill('rgba(255, 255, 255, .38)');
             });
+
+            this.setStyle('cursor', 'pointer');
+        },
+
+        setValue: function(value, color) {
+            var text = value > 99 ? '99+' : String(value);
+            var box;
+            var width;
+
+            this.text.setContent(text);
+            this.text.fill('#7a5200');
+            this.rect.fill('#7c6cff');
+            this.rect.stroke('#7c6cff', 1);
+
+            box = this.text.getBoundaryBox();
+            width = Math.round(box.width + 12);
+            this.width = Math.max(20, width);
+
+            this.rect.setWidth(this.width);
+            this.glow.setWidth(Math.max(12, this.width - 2));
+            this.text.setX(this.width / 2);
         }
+    });
 
-        minder.on('contentchange import layoutallfinish themechange', function() {
-            updateTree();
-        });
+    var ResourceCountRenderer = kity.createClass('ObsidianResourceCountRenderer', {
+        base: Renderer,
 
-        minder.__obsidianResourceHintInstalled = true;
-        setTimeout(updateTree, 0);
-    }
+        create: function(node) {
+            var badge = new ResourceCountBadge();
 
-    return module.exports = function(editor) {
-        installResourceHint(editor);
+            badge.on('mousedown', function(e) {
+                e.preventDefault();
+                node.getMinder().fire('editnoterequest');
+            });
+
+            return badge;
+        },
+
+        shouldRender: function(node) {
+            return parseResources(node).length > 0;
+        },
+
+        update: function(badge, node, box) {
+            var count = parseResources(node).length;
+            var x;
+            var y = -badge.height / 2;
+            var gap = node.getStyle('space-left');
+            var color = node.getStyle('color');
+
+            badge.setValue(count, color);
+
+            x = box.left - badge.width - gap;
+
+            badge.setTranslate(x, y);
+
+            return new kity.Box(x, y, badge.width, badge.height);
+        }
+    });
+
+    module.exports = {
+        ResourceCountRenderer: ResourceCountRenderer
     };
 });

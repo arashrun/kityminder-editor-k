@@ -8,6 +8,31 @@
  */
 define(function(require, exports, module) {
     var Minder = require('../minder');
+    var ResourceCountRenderer = require('./obsidian-resource-hint').ResourceCountRenderer;
+
+    function attachRendererToNode(node) {
+        if (!node._renderers) {
+            return;
+        }
+
+        for (var i = 0; i < node._renderers.length; i++) {
+            if (node._renderers[i] instanceof ResourceCountRenderer) {
+                return;
+            }
+        }
+
+        node._renderers.push(new ResourceCountRenderer(node));
+    }
+
+    function attachRendererToTree(root) {
+        if (!root || !root.traverse) {
+            return;
+        }
+
+        root.traverse(function(node) {
+            attachRendererToNode(node);
+        });
+    }
 
     function MinderRuntime() {
 
@@ -15,6 +40,15 @@ define(function(require, exports, module) {
         var minder = new Minder({
             enableKeyReceiver: false,
             enableAnimation: true
+        });
+
+        minder._rendererClasses = minder._rendererClasses || {};
+        minder._rendererClasses.left = minder._rendererClasses.left || [];
+        minder._rendererClasses.left.unshift(ResourceCountRenderer);
+        attachRendererToTree(minder.getRoot());
+
+        minder.on('contentchange', function() {
+            attachRendererToTree(minder.getRoot());
         });
 
         // 渲染，初始化
