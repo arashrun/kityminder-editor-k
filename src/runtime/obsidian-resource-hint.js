@@ -48,13 +48,13 @@ define(function(require, exports, module) {
 
             this.addShapes([this.rect, this.glow, this.text]);
 
-            this.on('mouseover', function() {
-                this.rect.fill('rgba(255, 236, 140, 1)');
-                this.glow.fill('rgba(255, 255, 255, .5)');
-            }).on('mouseout', function() {
-                this.rect.fill('rgba(255, 243, 170, .95)');
-                this.glow.fill('rgba(255, 255, 255, .38)');
-            });
+            // this.on('mouseover', function() {
+            //     this.rect.fill('rgba(255, 236, 140, 1)');
+            //     this.glow.fill('rgba(255, 255, 255, .5)');
+            // }).on('mouseout', function() {
+            //     this.rect.fill('rgba(255, 243, 170, .95)');
+            //     this.glow.fill('rgba(255, 255, 255, .38)');
+            // });
 
             this.setStyle('cursor', 'pointer');
         },
